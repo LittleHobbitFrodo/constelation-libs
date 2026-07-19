@@ -3,6 +3,7 @@ name = "libelf"
 description = "Library for unified loading of ELF files across Cronos"
 version = "0.1.0"
 edition = "2024"
+licence = "MIT"
 
 [dev-dependencies]
 
