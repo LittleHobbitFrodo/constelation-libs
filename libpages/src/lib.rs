@@ -30,8 +30,17 @@ pub(crate) trait PageEntryUnion where Self: PageEntry {}
 
 /// A thread-safe page table
 #[allow(private_bounds)]
-pub struct PageTable<E: PageEntryUnion> {
-    raw: [E; PAGE_TABLE_ELEMENT_COUNT]
+pub struct PageTable<E: PageEntryUnion>([E; PAGE_TABLE_ELEMENT_COUNT]);
+
+impl<E: PageEntryUnion> core::ops::Deref for PageTable<E> {
+    type Target = [E; PAGE_TABLE_ELEMENT_COUNT];
+    #[inline]
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl<E: PageEntryUnion> core::ops::DerefMut for PageTable<E> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
 }
 
 
