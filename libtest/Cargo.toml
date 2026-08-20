@@ -1,9 +1,0 @@
-[package]
-name = "libtest"
-description = "Provides testing utilities for the Constelation kernel"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-librand = { path="../librand", version="0.1.0" }
-macros = { path="macros", version="0.1.0"}
