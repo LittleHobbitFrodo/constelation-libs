@@ -1,0 +1,1 @@
+frame::AllocatedFrame<'alloc, ALIGN>: extent::AllocatedExtent<'alloc, frame::AllocatedFrame<'alloc, ALIGN>, ALIGN>

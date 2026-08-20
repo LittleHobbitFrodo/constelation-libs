@@ -102,7 +102,7 @@ impl<T: Sized> From<T> for Mutex<T> {
 
 
 /// A guard providing mutable access to data
-pub(crate) struct MutexGuard<'l, T: Sized + 'l> {
+pub struct MutexGuard<'l, T: Sized + 'l> {
     data: NonNull<T>,
     _marker: PhantomData<&'l mut T>
 }

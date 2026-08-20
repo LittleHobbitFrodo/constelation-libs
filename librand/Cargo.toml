@@ -3,3 +3,9 @@ name = "librand"
 description = "Provides various random number generators"
 version = "0.1.0"
 edition = "2024"
+
+
+[features]
+testing=[]
+
+[dependencies]
