@@ -15,6 +15,8 @@ mod batch;
 pub use batch::*;
 
 
+//  TODO: add used memory blocks to the init functions
+
 
 /// An implementation of an extent allocator that operates with
 /// a predetermined page size, various sizes of allocated blocks,
@@ -177,6 +179,22 @@ impl<const ALIGN: usize, Ext: Extent<ALIGN>, Lay: LayoutDescriptor<ALIGN>> Exten
     #[allow(private_bounds)]
     #[inline(never)]
     pub fn deallocate<E: ExtentMarker<ALIGN, Ext>>(&self, extent: E) -> Result<(), ()> {
+        todo!();
+    }
+
+    /// Deallocates a `part` of the `original` extent
+    /// - Returns `Err` if `part` does not fit into `original` or if `original` cannot be found
+    #[allow(private_bounds)]
+    #[inline(never)]
+    pub fn deallocate_part<E: ExtentMarker<ALIGN, Ext>>(&self, original: E, part: E) -> Result<(), ()> {
+        todo!();
+    }
+
+    /// Deallocates a `part` of the `original` extent
+    /// - Does not check whether `part` fits into `original`
+    #[allow(private_bounds)]
+    #[inline(never)]
+    pub unsafe fn deallocate_part_unchecked<E: ExtentMarker<ALIGN, Ext>>(&self, original: E, part: E) -> Result<(), ()> {
         todo!();
     }
 

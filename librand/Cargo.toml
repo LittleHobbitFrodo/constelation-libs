@@ -6,6 +6,7 @@ edition = "2024"
 
 
 [features]
-testing=[]
+testing=["sextant"]
+sextant=[]  #   uses sextant's hook randomization hook
 
 [dependencies]

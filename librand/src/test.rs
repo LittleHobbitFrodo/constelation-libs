@@ -1,29 +1,52 @@
+//! Provides the `TestRng` - a pseudo random number generator used only for testing
+
 use alloc::string::String;
 
-use core::ops::{Bound, Range, RangeBounds};
+use core::{ops::{Bound, Range, RangeBounds}, sync::atomic::Ordering};
+
+use crate::SEXTANT_SEED;
+
+
+//#[cfg(feature = "testing")]
 #[derive(Clone, Debug)]
 /// Simple pseudo random number generator made for unit testing and (maybe) fuzzing
 /// - This is **NOT** cryptographically safe RNG
-pub struct TestRng<R: FnMut() -> Result<usize, ()>> {
-    state: usize,
-    f: R,
-}
+pub struct TestRng;
 
-/// Helper macro that makes sure both `Rng` and `TestRng` works exactly the same
-macro_rules! generate_worker_code {
-    () => {
-        #[inline]
+//#[cfg(feature = "testing")]
+impl TestRng {
+
+    #[cfg(feature = "testing")]
+    /// Constructs the `TestRng` and initializes the global seed
+    pub fn new() -> Self {
+        unsafe { super::__sextant_randomization_hook(&SEXTANT_SEED) }
+        Self
+    }
+
+    #[cfg(not(feature = "testing"))]
+    /// Constructs the `TestRng` and initializes the global seed
+    pub fn new() -> Self {
+        panic!("TestRng can only be used when feature \"testing\" is enabled");
+    }
+
+
     /// Returns next random number
     pub fn next(&mut self) -> usize {
 
         let mut z = {
-            self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
-            self.state
+            SEXTANT_SEED.fetch_add(0x9E3779B97F4A7C15, Ordering::AcqRel)
+            + 0x9E3779B97F4A7C15
+            //self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+            //self.state
+
         };
 
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        z ^ (z >> 31)
+
+        let result = z ^ (z >> 31);
+        _ = SEXTANT_SEED.fetch_xor(result, Ordering::AcqRel);
+        result
     }
 
     #[inline]
@@ -105,58 +128,5 @@ macro_rules! generate_worker_code {
     pub fn next_signed(&mut self) -> isize {
         usize::cast_signed(self.next())
     }
-    };
-}
-
-impl<R: FnMut() -> Result<usize, ()>> TestRng<R> {
-
-    /// Constructs new uninitialized `Rng` with state equal to zero
-    pub const fn new_uninit(randomizer: R) -> Self {
-        Self { state: 0, f: randomizer }
-    }
-
-    /// Constructs new uninitialized `Rng` with randomizer
-    pub const fn new_uninit_with(randomizer: R) -> Self {
-        Self { state: 0, f: randomizer }
-    }
-
-    #[inline]
-    /// Creates new `Rng` and initializes it by given randomizer
-    pub fn new(mut randomizer: R) -> Result<Self, ()> {
-        Ok(Self {
-            state: randomizer()?,
-            f: randomizer
-        })
-    }
-
-    #[inline]
-    /// Initializes the `Rng` by using the randomizer closure
-    pub fn initialize(&mut self) -> Result<(), ()> {
-        self.state = (self.f)()?;
-        Ok(())
-    }
-
-    #[inline]
-    /// Initializes the `Rng` by using the given closure
-    pub fn initialize_with<X: FnMut() -> Result<usize, ()>>(&mut self, mut f: X) -> Result<(), ()> {
-        self.state = f()?;
-        Ok(())
-    }
-
-    #[inline]
-    /// Randomizes the generator by xorring current state with value returned by the randomizer
-    pub fn randomize(&mut self) -> Result<(), ()> {
-        self.state ^= (self.f)()?;
-        Ok(())
-    }
-
-    #[inline]
-    /// Randomizes the `Rng` by xorring the state with value returned by the given randomizer
-    pub fn randomize_with<X: FnMut() -> Result<usize, ()>>(&mut self, mut f: X) -> Result<(), ()> {
-        self.state ^= f()?;
-        Ok(())
-    }
-
-    generate_worker_code!();
 
 }
