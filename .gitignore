@@ -1,5 +1,5 @@
-/libelf/target
-/libpages/target
-/liblock/target
-/libtest/target
+/libelf/target/
+/libpages/target/
+/liblock/target/
+/libtest/target/
 /libmem/target/
