@@ -1,12 +1,15 @@
 use core::num::NonZero;
 
-use crate::{AlignedAddress, extent_alloc::ExtentAllocator};
+use crate::{AlignedAddress, AlignedNonNull, extent_alloc::ExtentAllocator};
 
 mod raw;
 pub use raw::*;
 
 mod scoped;
 pub use scoped::*;
+
+mod mutable;
+pub use mutable::*;
 
 /// Marks all extents (including `ScopedExtent` and `AllocatedExtent`)
 /// and bounds them with a raw extent
@@ -25,7 +28,7 @@ pub trait Extent<const ALIGN: usize>
 where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
 
     /// Constructs a new extent
-    fn new(address: AlignedAddress<usize, ALIGN>, pages: NonZero<usize>) -> Self;
+    fn new(address: AlignedNonNull<NonZero<u64>, ALIGN>, pages: NonZero<u64>) -> Self;
 
     /// Indicates whether `self` and `other` are right next to each
     /// other and are then "touching" each other
@@ -38,21 +41,19 @@ where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
     }
 
     /// Returns the starting address of the extent
-    fn address(&self) -> AlignedAddress<usize, ALIGN>;
+    fn address(&self) -> AlignedNonNull<NonZero<u64>, ALIGN>;
 
     /*/// Moves the extent by overwriting its address (size is kept)
     fn move_to(&mut self, new_address: AlignedAddress<usize, ALIGN>);*/
 
     /// Calculates the ending address of the frame
     #[inline]
-    fn end_address(&self) -> AlignedAddress<usize, ALIGN> {
-        unsafe {
-            AlignedAddress::new_unchecked(self.address().saturating_add(self.size().get() * ALIGN))
-        }
+    fn end_address(&self) -> AlignedNonNull<NonZero<u64>, ALIGN> {
+        self.address().aligned_add(self.size().get() as usize)
     }
 
     /// Returns the size in pages
-    fn size(&self) -> NonZero<usize>;
+    fn size(&self) -> NonZero<u64>;
 
     /// Indicates whether `self` fits into `other`
     /// - Uses starting and ending addresses of
@@ -72,12 +73,3 @@ where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
     }
 
 }
-
-
-/*/// Returned by the `ExtentDefinition::remove_from()` function on success
-pub struct RemovedExtents<Ext: Extent<ALIGN>, const ALIGN: usize> {
-    /// The original frame - shrinked to create a space for `self`
-    pub shrinked: Option<Ext>,
-    /// The remaining space after removing
-    pub remainder: Option<Ext>
-}*/

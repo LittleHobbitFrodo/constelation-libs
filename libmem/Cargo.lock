@@ -5,18 +5,15 @@ version = 4
 [[package]]
 name = "liblock"
 version = "0.1.0"
-dependencies = [
- "librand",
-]
 
 [[package]]
 name = "libmem"
 version = "0.1.0"
 dependencies = [
  "liblock",
- "librand",
+ "libtestrand",
 ]
 
 [[package]]
-name = "librand"
+name = "libtestrand"
 version = "0.1.0"

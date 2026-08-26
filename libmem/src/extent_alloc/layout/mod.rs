@@ -2,6 +2,8 @@ mod physical;
 pub use physical::*;
 
 use crate::AlignedAddress;
+#[cfg(debug_assertions)]
+use core::fmt::Debug;
 use core::num::NonZero;
 
 
@@ -14,7 +16,7 @@ pub trait LayoutDescriptor<const ALIGN: usize> where Self: Sized + Clone {
     type Err: Sized;
 
     /// Size (in pages) of the frame to allocate
-    fn size(&self) -> u64;
+    fn size(&self) -> NonZero<u64>;
 
     /// Constructs the descriptor from a count of pages
     fn from_pages(count: NonZero<u64>) -> Result<Self, Self::Err>;
@@ -65,7 +67,7 @@ impl<const ALIGN: usize> LayoutDescriptor<ALIGN> for ExtentLayout<ALIGN> {
     type Err = IntegerOverflow;
 
     #[inline(always)]
-    fn size(&self) -> u64 { self.0.get() }
+    fn size(&self) -> NonZero<u64> { self.0 }
 
     #[inline(always)]
     fn from_pages(count: NonZero<u64>) -> Result<Self, Self::Err> {
@@ -98,4 +100,11 @@ impl<const ALIGN: usize> LayoutDescriptor<ALIGN> for ExtentLayout<ALIGN> {
         Some(Self(half))
     }
 
+}
+
+#[cfg(debug_assertions)]
+impl<const ALIGN: usize> Debug for ExtentLayout<ALIGN> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "ExtentLayout {{ size: {}, align: {} }}", self.size(), self.align())
+    }
 }

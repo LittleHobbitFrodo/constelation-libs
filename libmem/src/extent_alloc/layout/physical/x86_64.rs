@@ -1,7 +1,12 @@
+#[cfg(test)]
+use libtestrand::TestRng;
+
+use crate::Alignment;
+
 use super::PhysicalLayout;
 use super::super::LayoutDescriptor;
 //use crate::extent_alloc::{layout::LayoutDescriptor};
-use crate::{Address, MB, PAGE_SIZE, PAGE_TABLE_ENTRY_COUNT, extent_alloc::layout::IntegerOverflow};
+use crate::{Address, GB, KB, MB, PAGE_SIZE, PAGE_TABLE_ENTRY_COUNT, extent_alloc::layout::{self, IntegerOverflow}};
 use core::num::NonZero;
 
 
@@ -11,7 +16,11 @@ impl LayoutDescriptor<PAGE_SIZE> for PhysicalLayout {
 
     type Err = IntegerOverflow;
 
-    fn size(&self) -> u64 { self.0.get() & Self::MASK_COMBINED }
+    fn size(&self) -> NonZero<u64> {
+        let size = self.0.get() & Self::MASK_COMBINED;
+        debug_assert!(size != 0);
+        unsafe { NonZero::new_unchecked(size) }
+    }
 
     fn from_pages(count: NonZero<u64>) -> Result<Self, Self::Err> {
         if count.get() > Self::MAX_PAGE_COUNT {
@@ -34,7 +43,7 @@ impl LayoutDescriptor<PAGE_SIZE> for PhysicalLayout {
 
     fn split(&mut self) -> Option<Self> {
 
-        let count = self.size();
+        let count = self.size().get();
 
         let half = count.saturating_div(2);
 
@@ -128,65 +137,40 @@ impl PhysicalLayout {
 }
 
 
-/*impl PhysicalLayout {
-
-    /// Returns the count of the 1GB pages
-    #[inline(always)]
-    fn pages_1gig(&self) -> usize {
-        (self.0.get() & Self::MASK_1GB) >> Self::SHIFT_1GB
-    }
-
-    /// Returns the count of the 2MB pages
-    #[inline(always)]
-    fn pages_2mb(&self) -> usize {
-        (self.0.get() & Self::MASK_2MB) >> Self::MASK_2MB
-    }
-
-    /// Returns the count of the 4KB pages
-    #[inline(always)]
-    fn pages_4kb(&self) -> usize {
-        self.0.get() & Self::MASK_4KB
-    }
-}*/
-
-
-
-
-
 #[test]
-fn kb4() {
+fn align() {
 
-    let layout = PhysicalLayout::from_pages(NonZero::new(PhysicalLayout::MASK_4KB).unwrap())
-        .expect("page count overflow");
-    assert!(layout.size() == PhysicalLayout::MASK_4KB);
-    assert!(layout.0.get() & PhysicalLayout::MASK_4KB == PhysicalLayout::MASK_4KB);
+    let mut rand = TestRng::new();
 
-    assert!(layout.align().get() == 4096);    //  4KB
-    assert!(((layout.0.get() & PhysicalLayout::MASK_ALIGN) >> PhysicalLayout::SHIFT_ALIGN) == 12);
-}
+    for _ in 0..200 {
+        let count = rand.next() as u64;
 
+        if count == 0 { continue; }
 
-#[test]
-fn mb2() {
+        let layout = match PhysicalLayout::from_pages(NonZero::new(count).unwrap()) {
+            Ok(lay) => {
+                assert!(count <= PhysicalLayout::MAX_PAGE_COUNT);
+                lay
+            },
+            Err(_) => {
+                assert!(count > PhysicalLayout::MAX_PAGE_COUNT);
+                continue;
+            }
+        };
 
-    let layout = PhysicalLayout::from_pages(NonZero::new(PhysicalLayout::MASK_2MB).unwrap())
-        .expect("page count overflow");
-    assert!(layout.size() == PhysicalLayout::MASK_2MB);
-    assert!(layout.0.get() & PhysicalLayout::MASK_2MB == PhysicalLayout::MASK_2MB);
+        //  check align
+        let align = layout.align().get();
 
-    assert!(layout.align().get() == 2048 * 1024);  //  2MB
-    assert!(((layout.0.get() & PhysicalLayout::MASK_ALIGN) >> PhysicalLayout::SHIFT_ALIGN) == 21);
-}
+        //  constants for matching
+        const MASK_4KB_ADD: u64 = PhysicalLayout::MASK_4KB + 1;
+        const MASK_2MB_ADD: u64 = PhysicalLayout::MASK_2MB + 1;
 
-#[test]
-fn gb1() {
+        match layout.size().get() {
+            0..=PhysicalLayout::MASK_4KB => assert!(align == 4*KB as u64),
+            MASK_4KB_ADD..=PhysicalLayout::MASK_2MB => assert!(align == 2*MB as u64),
+            MASK_2MB_ADD..=PhysicalLayout::MASK_1GB => assert!(align == 1*GB as u64),
+            _ => unreachable!(),
+        }
 
-    let layout = PhysicalLayout::from_pages(NonZero::new(PhysicalLayout::MASK_1GB).unwrap())
-        .expect("page count overflow");
-    assert!(layout.size() == PhysicalLayout::MASK_1GB);
-    assert!(layout.0.get() & PhysicalLayout::MASK_1GB == PhysicalLayout::MASK_1GB);
-
-    assert!(layout.align().get() == 1024 * 1024 * 1024);
-    assert!(((layout.0.get() & PhysicalLayout::MASK_ALIGN) >> PhysicalLayout::SHIFT_ALIGN) == 30);
-
+    }
 }
