@@ -1,0 +1,43 @@
+use core::num::NonZero;
+
+use crate::{AlignedNonNull, extent_alloc::extent::{BuiltinExt, RawExtent, Extent}};
+
+
+
+/// An extent type used by the extent allocator under the hood
+#[derive(Clone)]
+#[repr(C)]
+pub struct InternalExtent<const ALIGN: usize> {
+    start: AlignedNonNull<NonZero<u64>, ALIGN>,
+    size: NonZero<u64>,
+}
+
+
+//  mark extent defined within libmem
+impl<const ALIGN: usize> BuiltinExt for InternalExtent<ALIGN> {}
+
+//  mark constructible extent
+impl<const ALIGN: usize> RawExtent<ALIGN> for InternalExtent<ALIGN> {
+    #[inline(always)]
+    fn new(address: AlignedNonNull<NonZero<u64>, ALIGN>, pages: NonZero<u64>) -> Self {
+        Self { start: address, size: pages }
+    }
+}
+
+
+impl<const ALIGN: usize> Extent<ALIGN> for InternalExtent<ALIGN> {
+    #[inline(always)]
+    fn address(&self) -> AlignedNonNull<NonZero<u64>, ALIGN> {
+        self.start
+    }
+
+    #[inline(always)]
+    fn size(&self) -> NonZero<u64> { self.size }
+}
+
+
+impl<const ALIGN: usize> core::fmt::Debug for InternalExtent<ALIGN> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Extent {{ a: {:p}, size: {} }}", self.address(), self.size)
+    }
+}

@@ -195,7 +195,7 @@ impl<T> AddressMarker for *mut T {
 fn new() {
     type AlignedAddr = AlignedAddress<usize, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {
@@ -218,7 +218,7 @@ fn new() {
 fn new_up_and_down() {
     type AlignedAddr = AlignedAddress<usize, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {
@@ -240,7 +240,7 @@ fn aligned_add() {
 
     type AlignedAddr = AlignedAddress<usize, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {

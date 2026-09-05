@@ -4,9 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 
+[lib]
+doctest = false
 
 [dependencies]
 liblock = { path="../liblock/", version = "0.1.0" }
 
 [dev-dependencies]
-libtestrand = { path="../libtestrand" }
+libtest = { path="../libtest" }
+
+
+[features]
+extent_alloc = []
+default = ["extent_alloc"]

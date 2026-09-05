@@ -1,5 +1,5 @@
 #[cfg(test)]
-use libtestrand::TestRng;
+use libtest::TestRng;
 
 use crate::Alignment;
 

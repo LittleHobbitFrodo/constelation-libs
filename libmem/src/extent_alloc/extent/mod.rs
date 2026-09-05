@@ -1,34 +1,29 @@
+use crate::{AlignedNonNull, extent_alloc::ExtentAllocMarker};
 use core::num::NonZero;
 
-use crate::{AlignedAddress, AlignedNonNull, extent_alloc::ExtentAllocator};
 
-mod raw;
-pub use raw::*;
+mod internal;
+pub use internal::InternalExtent;
 
 mod scoped;
-pub use scoped::*;
+pub use scoped::ScopedExtent;
+
+mod batch;
+pub use batch::Batch;
 
 mod mutable;
-pub use mutable::*;
-
-/// Marks all extents (including `ScopedExtent` and `AllocatedExtent`)
-/// and bounds them with a raw extent
-pub(crate) trait ExtentMarker<const ALIGN: usize, Ext: Extent<ALIGN>> {}
-
-impl<T, const ALIGN: usize> ExtentMarker<ALIGN, Self> for T
-where T: Extent<ALIGN> {}
+pub use mutable::{MutableExtent, RemainingExtents};
 
 /// An extent describes a chunk of memory by its starting address and its size
-/// - Individual blocks of memory are more often reffered to as **frames**
+///
+/// > Consider implementing the `ConstructibleExtent` which
+/// may be required by some extent allocator functions
 ///
 /// > NOTE: Functions that are automatically implemented
 /// by this trait are free to use `debug_assert!`ions
 #[allow(private_bounds)]
 pub trait Extent<const ALIGN: usize>
-where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
-
-    /// Constructs a new extent
-    fn new(address: AlignedNonNull<NonZero<u64>, ALIGN>, pages: NonZero<u64>) -> Self;
+where Self: Sized {
 
     /// Indicates whether `self` and `other` are right next to each
     /// other and are then "touching" each other
@@ -42,9 +37,6 @@ where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
 
     /// Returns the starting address of the extent
     fn address(&self) -> AlignedNonNull<NonZero<u64>, ALIGN>;
-
-    /*/// Moves the extent by overwriting its address (size is kept)
-    fn move_to(&mut self, new_address: AlignedAddress<usize, ALIGN>);*/
 
     /// Calculates the ending address of the frame
     #[inline]
@@ -62,14 +54,39 @@ where Self: Sized + Clone + ExtentMarker<ALIGN, Self> {
     ///   - Therefore `assert!(extent.fits_into(extent.clone()))` will pass
     #[inline]
     fn fits_into(&self, other: &'_ Self) -> bool {
-        *self.address() >= *other.address() && *self.end_address() <= *other.address()
+        *self.address() >= *other.address() && *self.end_address() <= *other.end_address()
     }
-
 
     /// Indicates whether the two extents are overlapping
     #[inline]
     fn is_overlapping(&self, other: &'_ Self) -> bool {
         !(self.end_address() <= other.address() || self.address() >= other.end_address())
     }
+}
 
+
+/// Marks raw extents that can be used internally by the allocator
+pub trait RawExtent<const ALIGN: usize> {
+    fn new(address: AlignedNonNull<NonZero<u64>, ALIGN>, pages: NonZero<u64>) -> Self;
+}
+
+/// Marks extent types that are defined within the `libmem` crate
+pub(crate) trait BuiltinExt {}
+
+/// Marks abstraction types
+/// - Raw extents are unmarked by this trait
+pub(crate) trait AbstractExtent<'alloc, const ALIGN: usize, Ext: Extent<ALIGN>, Alloc: ExtentAllocMarker>
+where Self: BuiltinExt {
+    //fn from_ext_with_alloc(ext: Ext, alloc: &'alloc Alloc) -> Self;
+}
+
+
+
+/// Inidicates whether the extent is used or free
+#[derive(Clone)]
+pub enum TakenExtent<const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>> {
+    /// An extent that is not used and/or allocated
+    Free(Ext),
+    /// An extent that is used and/or allocated
+    Used(Ext)
 }

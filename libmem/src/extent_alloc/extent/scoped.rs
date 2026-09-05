@@ -1,93 +1,111 @@
-use core::{marker::PhantomData, mem::ManuallyDrop, ops::{Deref, DerefMut}};
-
-use crate::{AlignedAddress, extent_alloc::{ExtentMarker, layout::LayoutDescriptor}};
+use core::marker::PhantomData;
 use core::num::NonZero;
 
-use super::{RawExtent, Extent, ExtentAllocator};
+use crate::extent_alloc::{ExtentAlloc, extent::{AbstractExtent, BuiltinExt, Extent, /*OwnedExtent,*/ RawExtent}};
 
-/// An extent allocated by the `ExtentAllocator`
-///
-/// The main difference between this and `RawExtent`
-/// is that `Extent` is prevented to outlive its allocator
+
+
+
+/// An abstraction over a raw extent type that makes sure that
+/// the unnderlying extent does not outlive its allocator
+#[allow(private_bounds)]
 #[derive(Clone)]
 #[repr(C)]
-pub struct ScopedExtent<'alloc, const ALIGN: usize, Ext: Extent<ALIGN>> {
+pub struct ScopedExtent<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>> {
     ext: Ext,
-    _life: PhantomData<&'alloc ()>,
+    _alloc: PhantomData<&'alloc Alloc>
 }
-impl<Ext: Extent<ALIGN>, const ALIGN: usize> ExtentMarker<ALIGN, Ext> for ScopedExtent<'_, ALIGN, Ext> {}
 
-impl<Ext: Extent<ALIGN>, const ALIGN: usize> ScopedExtent<'_, ALIGN, Ext> {
+//  mark extent defined within libmem
+impl<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>>
+BuiltinExt for ScopedExtent<'alloc, ALIGN, Ext, Alloc> {}
 
-    pub(crate) fn new<'alloc>(ext: Ext) -> ScopedExtent<'alloc, ALIGN, Ext>
-    where Self: 'alloc {
-        Self { ext, _life: PhantomData }
+//  mark abstraction over raw extent
+impl<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>>
+AbstractExtent<'alloc, ALIGN, Ext, Alloc> for ScopedExtent<'alloc, ALIGN, Ext, Alloc> {
+
+    /*#[inline(always)]
+    fn from_ext_with_alloc(ext: Ext, _: &'alloc Alloc) -> Self {
+        Self { ext, _alloc: PhantomData }
+    }*/
+}
+
+
+impl<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>>
+core::ops::Deref for ScopedExtent<'alloc, ALIGN, Ext, Alloc> {
+    type Target = Ext;
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target { &self.ext }
+}
+
+
+impl<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>> ScopedExtent<'alloc, ALIGN, Ext, Alloc> {
+
+    /// Constructs an `ScopedExtent` from the given raw extent
+    pub unsafe fn from_extent(ext: Ext) -> Self {
+        Self { ext, _alloc: PhantomData }
     }
 
-    /// Converts the `Frame` into its inner extent
-    /// - Does not `drop` `self`
+    /// Sets the inner raw extent free
     ///
     /// # Safety
-    /// This function is not unsafe on its own, but the
-    /// consequences of calling it may be.
-    /// Since `into_extent()` converts a `Frame` — which
-    /// has a lifetime bound to its allocator — into an
-    /// extent that lacks such a binding, there is a risk
-    /// that the converted extent will outlive its allocator,
-    /// leading to undefined behavior.
-    #[inline]
+    /// It is up to the caller to guarantee that the
+    /// returned extent will not outlive its allocator
     pub unsafe fn into_extent(self) -> Ext {
-        let ret = self.ext.clone();
-        _ = ManuallyDrop::new(self);
-        ret
+        let Self { ext, _alloc } = self;
+        ext
     }
 
-    /// Converts an extent into a `Frame` with a bound to its allocator
-    pub unsafe fn from_extent<'alloc>(extent: Ext) -> ScopedExtent<'alloc, ALIGN, Ext>
-    where Self: 'alloc {
-        Self { ext: extent, _life: PhantomData }
-    }
-
+    /*/// Converts the `ScopedExtent` into an `OwnedExtent`
+    ///
+    /// # Safety
+    /// This function takes a reference to an allocator, it is up to the caller to
+    /// guarantee that the passed allocator is the one that has allocated the `ScopedExtent`
+    pub(crate) unsafe fn into_owned(self, alloc: &'alloc Alloc) -> OwnedExtent<'alloc, ALIGN, Ext, Alloc> {
+        unsafe {
+            OwnedExtent::from_extent_and_alloc(self.into_extent(), alloc)
+        }
+    }*/
 }
 
-impl<Ext: Extent<ALIGN>, const ALIGN: usize> Deref for ScopedExtent<'_, ALIGN, Ext> {
-    type Target = Ext;
+impl<'alloc, const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Alloc: ExtentAlloc<ALIGN>>
+Extent<ALIGN> for ScopedExtent<'alloc, ALIGN, Ext, Alloc> {
+
+    /// Indicates whether `self` and `other` are right next to each
+    /// other and are then "touching" each other
+    /// - Returns `false` if the extents are overlapping
     #[inline(always)]
-    fn deref(&self) -> &Self::Target { &self.ext }
-}
+    fn is_touching(&self, other: &'_ Self) -> bool { self.ext.is_touching(&other.ext) }
 
-
-
-
-
-
-
-/// Simillarly to `ScopedExtent`, it prevents the extent from
-/// outliving its allocator. `OwnedExtent` also
-/// automatically deallocates the extent when `drop`ped
-#[derive(Clone)]
-#[repr(C)]
-pub struct OwnedExtent<'alloc, const ALIGN: usize, Ext: Extent<ALIGN>, Lay: LayoutDescriptor<ALIGN>> {
-    ext: Ext,
-    alloc: &'alloc ExtentAllocator<ALIGN, Ext, Lay>,
-}
-impl<Ext: Extent<ALIGN>, const ALIGN: usize, Lay: LayoutDescriptor<ALIGN>> ExtentMarker<ALIGN, Ext> for OwnedExtent<'_, ALIGN, Ext, Lay> {}
-
-
-
-impl<'alloc, Ext: Extent<ALIGN>, const ALIGN: usize, Lay: LayoutDescriptor<ALIGN>> OwnedExtent<'alloc, ALIGN, Ext, Lay> {
-    pub(crate) const fn new(ext: Ext, alloc: &'alloc ExtentAllocator<ALIGN, Ext, Lay>) -> Self {
-        Self { ext, alloc }
-    }
-
-    pub fn into_scoped(self) -> ScopedExtent<'alloc, ALIGN, Ext> {
-        todo!();
-    }
-
-}
-
-impl<Ext: Extent<ALIGN>, const ALIGN: usize, Lay: LayoutDescriptor<ALIGN>> Deref for OwnedExtent<'_, ALIGN, Ext, Lay> {
-    type Target = Ext;
+    /// Returns the starting address of the extent
     #[inline(always)]
-    fn deref(&self) -> &Self::Target { &self.ext }
+    fn address(&self) -> crate::AlignedNonNull<NonZero<u64>, ALIGN> {
+        self.ext.address()
+    }
+
+    /// Calculates the ending address of the frame
+    #[inline(always)]
+    fn end_address(&self) -> crate::AlignedNonNull<NonZero<u64>, ALIGN> {
+        self.ext.end_address()
+    }
+
+    /// Returns the size in pages
+    #[inline(always)]
+    fn size(&self) -> NonZero<u64> { self.ext.size() }
+
+    /// Indicates whether `self` fits into `other`
+    /// - Uses starting and ending addresses of
+    /// the extents to determine the result
+    /// - Returns `true` if the extents are equivalent
+    ///   - Therefore `assert!(extent.fits_into(extent.clone()))` will pass
+    #[inline(always)]
+    fn fits_into(&self, other: &'_ Self) -> bool {
+        self.ext.fits_into(&other.ext)
+    }
+
+    /// Indicates whether the two extents are overlapping
+    #[inline(always)]
+    fn is_overlapping(&self, other: &'_ Self) -> bool {
+        self.ext.is_overlapping(&other.ext)
+    }
 }

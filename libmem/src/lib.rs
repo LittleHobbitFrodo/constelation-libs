@@ -1,13 +1,22 @@
 //! Provides memory management related subsystems for the Constelation kernel
 //!
 //! This includes:
+//! - Extent allocator (work in progress)
 //! - Physical allocator (work in progress)
 //! - Virtual address space mapper (not yet merged, work in progress)
 //! - Global allocator (not yet implemented)
 //! - And more!
 
+
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(unused_must_use)]
+#![deny(unsafe_op_in_unsafe_fn)]
+
 #![no_std]
 
+#[cfg(feature = "extent_alloc")]
 pub mod extent_alloc;
 
 mod misc;
@@ -21,17 +30,22 @@ pub use address::*;
 extern crate alloc;
 
 
-
-// /// The exposed physical allocator - the `#[global_alloc]` for allocating physical memory
-//pub static PHYSICAL: ExtentAllocator<PAGE_SIZE> = ExtentAllocator::uninit();
-
-
-//  allocator concept
-//      init:
-//          1) divide each usable memoey chunks into categories by size
-//              - smallest for a few-page-allocations, bigger for more pages, biggest for 1GB frames
-//
-//      algo: divide each usable chunk into separate used/free blocks
-//          - (de)alloc, search used/free blocks
-//              - BtreeMap<size, ...>?
-//
+/// Same as the `panic!()` macro, but hints a `cold_path()`
+/// to tell the compiler to optimize other paths
+///
+/// Panics in a kernel may not be unlikely (early development
+/// stage, etc.), but given that a panic only occurs once in a
+/// program lifetime (and terminates the panicking program),
+/// calling `cold_panic!()` insead of `panic!()` may boost
+/// kernel performance by a little
+#[macro_export]
+macro_rules! cold_panic {
+    () => {{
+        core::hint::cold_path();
+        panic!();
+    }};
+    ($($arg:tt)*) => {{
+        core::hint::cold_path();
+        panic!($($arg)*);
+    }};
+}

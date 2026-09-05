@@ -270,6 +270,13 @@ impl<T, const ALIGN: usize> NonNullAddress<ALIGN> for NonNull<T> {
 
 }
 
+impl<Addr: NonNullAddress<ALIGN>, const ALIGN: usize> core::fmt::Debug for AlignedNonNull<Addr, ALIGN> {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Pointer::fmt(&self, f)
+    }
+}
+
 
 
 
@@ -277,7 +284,7 @@ impl<T, const ALIGN: usize> NonNullAddress<ALIGN> for NonNull<T> {
 fn new() {
     type AlignedNN = AlignedNonNull<NonZero<usize>, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {
@@ -302,7 +309,7 @@ fn new_up() {
 
     type AlignedNN = AlignedNonNull<NonZero<usize>, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {
@@ -321,7 +328,7 @@ fn new_down() {
 
     type AlignedNN = AlignedNonNull<NonZero<usize>, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {
@@ -349,7 +356,7 @@ fn aligned_add() {
 
     type AlignedNN = AlignedNonNull<NonZero<usize>, 1024>;
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
     let mut rand = TestRng::new();
 
     for _ in 0..5000 {

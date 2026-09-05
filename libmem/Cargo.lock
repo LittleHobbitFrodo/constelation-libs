@@ -11,9 +11,9 @@ name = "libmem"
 version = "0.1.0"
 dependencies = [
  "liblock",
- "libtestrand",
+ "libtest",
 ]
 
 [[package]]
-name = "libtestrand"
+name = "libtest"
 version = "0.1.0"

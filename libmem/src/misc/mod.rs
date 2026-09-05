@@ -128,7 +128,7 @@ impl_page_alignment!(T, *mut T);
 #[test]
 fn alignment() {
 
-    use libtestrand::TestRng;
+    use libtest::TestRng;
 
     let mut rand = TestRng::new();
 
@@ -157,7 +157,7 @@ fn alignment() {
 /// Since all implementations are automatic, only one test is enough
 #[test]
 fn page_alignment() {
-    use libtestrand::TestRng;
+    use libtest::TestRng;
 
     let mut rand = TestRng::new();
 
