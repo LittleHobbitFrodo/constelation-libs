@@ -1,17 +1,20 @@
 
 mod indexes;
-use core::ptr::NonNull;
+use core::{fmt::Pointer, ptr::NonNull};
+
+#[cfg(test)]
+mod tests;
 
 pub use indexes::*;
-use libmem::{Address, AlignedAddress, NonNullAddress};
+use libmem::{Address, AlignedAddress, NonNullAddress, extent_alloc::extent::TakenExtent::Used};
 //use libmem::{Address, PAGE_SIZE, PAGE_TABLE_ENTRY_COUNT};
 
-use crate::levels::TableIndexer;
+use crate::{levels::TableIndexer, virt_addr::Pml4Indexer::Kernel};
 
 
-/// A representation of virtual address
-///
-/// > TODO: tests
+/// Abstraction over a virtual address. This structure makes
+/// it easier to use and manipulate page table indexes and
+/// the virtual addresses in general
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct VirtualAddress(u64);
@@ -34,31 +37,52 @@ impl VirtualAddress {
     #[inline(always)]
     pub fn is_null(&self) -> bool { self.0 == 0 }
 
+    /// Converts the `VirtualAddress` into a pointer
+    #[inline(always)]
+    pub fn as_ptr(&self) -> *const u8 { self.0 as _ }
+
+    /// Converts the `VirtualAddress` into a non-null pointer
+    #[inline(always)]
+    pub fn as_non_null(&self) -> Option<NonNull<u8>> {
+        unsafe {
+            core::mem::transmute_copy(&self.0)
+        }
+    }
+
+
     /// Mask for each level
     const NINE_BIT_MASK: u64 = 0x1FF;
 
     /// Mask of the highest 16 bits that determines
     /// whether the address belongs to the kernel
-    const HIGH_BITS: u64 = 0xFFFF << 48;
+    pub const HIGH_BITS: u64 = 0xFFFE << 48;
 
-    /// Mask of the offset index
-    const OFFSET_MASK: u64 = 0xFFF;
+    /// Mask of the page offset
+    pub const OFFSET_MASK: u64 = 0xFFF;
 
-    /// Mask of the `PT` table entries index
-    const PT_SHIFT: i32 = 12;
-    const PT_MASK: u64 = Self::NINE_BIT_MASK << Self::PT_SHIFT;
+    /// Shift of the `PT` table index
+    pub const PT_SHIFT: i32 = 12;
 
-    /// Mask of the `PD` table entries index
-    const PD_SHIFT: i32 = 21;
-    const PD_MASK: u64 = Self::NINE_BIT_MASK << Self::PD_SHIFT;
+    /// Mask of the `PT` table index
+    pub const PT_MASK: u64 = Self::NINE_BIT_MASK << Self::PT_SHIFT;
+
+    /// Shift of the `PD` table index
+    pub const PD_SHIFT: i32 = 21;
+
+    /// Mask of the `PD` table index
+    pub const PD_MASK: u64 = Self::NINE_BIT_MASK << Self::PD_SHIFT;
+
+    /// Shift of the `PDPT` table index
+    pub const PDPT_SHIFT: i32 = 30;
 
     /// Mask of the `PDPT` table entries index
-    const PDPT_SHIFT: i32 = 30;
-    const PDPT_MASK: u64 = Self::NINE_BIT_MASK << Self::PDPT_SHIFT;
+    pub const PDPT_MASK: u64 = Self::NINE_BIT_MASK << Self::PDPT_SHIFT;
 
-    /// Mask of the `PML4` table entries index
-    const PML4_SHIFT: i32 = 38;
-    const PML4_MASK: u64 = Self::NINE_BIT_MASK << Self::PML4_SHIFT;
+    /// Shift of the `PML4` table index
+    pub const PML4_SHIFT: i32 = 39;
+
+    /// Mask of the `PML4` table index
+    pub const PML4_MASK: u64 = Self::NINE_BIT_MASK << Self::PML4_SHIFT;
 
 
 
@@ -123,7 +147,7 @@ impl VirtualAddress {
     /// Returns the index of the `PML4` table
     #[inline(always)]
     pub fn pml4_index(&self) -> Pml4Indexer {
-        let raw_idx = self.0 >> Self::PML4_SHIFT;
+        let raw_idx = (self.0 >> Self::PML4_SHIFT) & Self::NINE_BIT_MASK;
         if raw_idx >= 256 {
             Pml4Indexer::Kernel((raw_idx >> 8) as u8)
         } else {
@@ -142,7 +166,7 @@ impl VirtualAddress {
     /// whether the address belongs to the kernel
     #[inline(always)]
     pub fn is_kernel_address(&self) -> bool {
-        (self.0 >> 48) as u16 == u16::MAX
+        self.0 & Self::HIGH_BITS == Self::HIGH_BITS
     }
 
     /// Checks the high bits of the address and returns
@@ -337,6 +361,13 @@ impl core::fmt::Debug for VirtualAddress {
     }
 }
 
+impl core::fmt::Pointer for VirtualAddress {
+    #[inline(always)]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Pointer::fmt(&(self.0 as *const u8), f)
+    }
+}
+
 
 /// The PML4 table is split into two halves:
 /// - The userspace (lower 256 entries)
@@ -348,6 +379,19 @@ pub enum Pml4Indexer {
 }
 
 impl Pml4Indexer {
+
+    /// Converts the indexer into `u16`
+    #[inline]
+    pub fn into_u16(self) -> u16 {
+        match self {
+            Self::User(idx) => idx as u16,
+            Self::Kernel(idx) => idx as u16 + u8::MAX as u16,
+        }
+    }
+
+    /// Uwraps the indexer and returns the
+    /// index of one of the two halves of the `PML4` table
+    #[inline]
     pub fn unwrap(self) -> u8 {
         match self {
             Self::Kernel(idx) => idx,

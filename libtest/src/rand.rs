@@ -31,10 +31,15 @@ pub struct TestRng {
 
 impl TestRng {
 
-    /// Constructs the `TestRng` and initializes the global seed
+    /// Constructs a new `TestRng` and initializes the global seed
     pub fn new() -> Self {
         randomize();
         Self { state: SEED.load(Relaxed) }
+    }
+
+    /// Construct a new with the given seed
+    pub const fn with_seed(seed: usize) -> Self {
+        Self { state: seed }
     }
 
 
