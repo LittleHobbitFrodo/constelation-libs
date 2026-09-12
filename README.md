@@ -25,3 +25,5 @@ This library provides synchronization and initialization primitives such as `Mut
 ## `libarch`
 `libarch` does not yet exist, but it will be a very important library responsible for CPU management. It will provide functionality that depends on the current processor architecture. This includes, for example, management of floating-point and SIMD registers, interrupts, context switching, and much more
 
+## `libtest`
+`libtest` serves as a bridge between the tested libraries, which are `#![no_std]` and `std`—that is, the test runtime. It contains a simple RNG for fuzzing and macros for printing text.
