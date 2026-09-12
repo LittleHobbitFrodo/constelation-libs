@@ -1,13 +1,10 @@
-use core::marker::PhantomData;
+use core::{hint::cold_path, marker::PhantomData};
 
-use alloc::vec::Vec;
+use alloc::vec::{Vec};
 
-use crate::extent_alloc::{
-    extent::{Extent, InternalExtent, RawExtent, TakenExtent, ScopedExtent},
-    layout::{ExtentLayout, LayoutDescriptor},
-    raw_alloc::{RawExtentAlloc, AlreadyInitialized},
-    ExtentAllocMarker, ExtentAlloc,
-};
+use crate::{cold_panic, extent_alloc::{
+    ExtentAlloc, ExtentAllocMarker, extent::{self, Batch, Extent, InternalExtent, RawExtent, ScopedExtent, TakenExtent}, layout::{ExtentLayout, LayoutDescriptor}, raw_alloc::{AlreadyInitialized, RawExtentAlloc},
+}};
 
 
 
@@ -91,9 +88,72 @@ ExtentAllocator<ALIGN, Ext, Lay> {
         } )
     }
 
+    /// Allocates any amount of extents to fulfill the given `layout`
+    ///
+    /// This function tries to allocate the extent as described by the `layout`.
+    /// If the allocation fails, it then proceeds to split the extent and
+    /// allocate the newly created layouts. This process repeats until the
+    /// layout is fulfilled or the system run out of memory
+    #[inline(never)]
+    pub fn alloc<'me>(&'me mut self, mut layout: Lay) -> Option<Batch<'me, ALIGN, Ext, Self>> {
 
-    pub fn alloc<'me>(&'me mut self, layout: Lay) -> Option<Vec<ScopedExtent<'me, ALIGN, Ext, Self>>> {
-        todo!();
+        //  try to allocate, split the layout if fails
+        let mut lays = match self.alloc.allocate(layout.clone()) {
+            Some(ext) => {
+                let ext = unsafe { ScopedExtent::from_extent(Ext::new(ext.address(), ext.size())) };
+                return Some(Batch::from_single(ext))
+            },
+            None => match layout.split() {
+                Some(lay) => Vec::from([layout, lay]),
+                None => {   //  split failed => layout cannot be allocated
+                    cold_path();
+                    return None
+                }
+            }
+        };
+
+        //  this vector will be returned on success
+        let mut exts = Vec::with_capacity(2);
+
+        //  try to allocate each of the layouts stored in `lays`
+        while let Some(mut layout) = lays.pop() {
+
+            match self.alloc.allocate(layout.clone()) {
+                Some(ext) => {  //  success: push into exts
+                    let ext = unsafe {
+                        ScopedExtent::from_extent(Ext::new(ext.address(), ext.size()))
+                    };
+
+                    exts.push(ext)
+                },
+                None => match layout.split() {  //  split and append to lays
+                    Some(lay) => {
+                        lays.push(layout);
+                        lays.push(lay);
+                    },
+                    None => {   //  split failed => layout cannot be allocated
+                        cold_path();
+
+                        //  recovery: deallocate all allocate extents
+                        for ext in exts {
+                            let ext = unsafe {
+                                InternalExtent::from_extent(ext.into_extent())
+                            };
+
+                            match self.alloc.deallocate(ext) {
+                                Ok(_) => { /* OK */ },
+                                Err(_) => cold_panic!("deallocation failed")
+                            }
+                        }
+
+                        return None
+                    }
+                }
+            }
+        }
+
+        Some(Batch::from_vec(exts))
+
     }
 
 

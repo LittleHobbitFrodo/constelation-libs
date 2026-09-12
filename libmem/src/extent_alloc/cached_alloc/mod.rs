@@ -97,7 +97,7 @@ CachedExtentAllocator<ALIGN, Ext, Lay, Cache> {
                 let mut allocated = MutableExtent::from_regular(suitable.clone());
 
                 match unsafe { allocated.split_unchecked(layout.size()) } {
-                    Some(_remainder) => {
+                    Some(remainder) => {
                         //  the allocated extent is smaller than the one deemed suitable
                         //      => split of the suitable extent is required
 
@@ -105,9 +105,18 @@ CachedExtentAllocator<ALIGN, Ext, Lay, Cache> {
 
                         let used_map = unsafe { self.alloc.used_map_mut() };
 
-                        if let Err(_) = used_map.split_extent(suitable, allocated.size()) {
-                            cold_panic!("splitting of suitable extent failed");
+                        //  remove the
+                        if let None = used_map.remove(&suitable.address()) {
+                            cold_panic!("splitting suitable extent failed")
                         }
+
+                        if let Some(_) = used_map.insert(remainder.address(), remainder.size()) {
+                            cold_panic!("splitting suitable extent failed")
+                        }
+
+                        /*if let Err(_) = used_map.split_extent(suitable, allocated.size()) {
+                            cold_panic!("splitting of suitable extent failed");
+                        }*/
                     },
                     None => {
                         //  no remainder

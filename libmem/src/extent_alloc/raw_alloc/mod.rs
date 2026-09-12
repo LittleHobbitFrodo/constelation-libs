@@ -1,22 +1,26 @@
-use crate::extent_alloc::{
+use alloc::collections::BTreeMap;
+
+use crate::{AlignedNonNull, extent_alloc::{
     extent::{Extent, InternalExtent, MutableExtent, RemainingExtents, ScopedExtent, TakenExtent}, layout::LayoutDescriptor,
-};
+}};
 use super::helpers::AllocMap;
-use core::{clone, hint::cold_path, num::NonZero};
+use core::{hint::cold_path, num::NonZero};
 use crate::cold_panic;
 
 
 //use functions::{find_suitable_in, extract_extent_from, insert_extent_to};
 
-
+/// The raw extent allocator internally used by the `ExtentAllocator` and `CachedExtentAllocator`
+#[repr(C)]
 pub struct RawExtentAlloc<const ALIGN: usize> {
     free: AllocMap<ALIGN>,
-    used: AllocMap<ALIGN>,
+    used: BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>>
+    //used: AllocMap<ALIGN>,
 }
 
 impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     pub const fn uninit() -> Self {
-        Self { used: AllocMap::uninit(), free: AllocMap::uninit() }
+        Self { used: /*AllocMap::uninit()*/ BTreeMap::new(), free: AllocMap::uninit() }
     }
 }
 
@@ -34,11 +38,18 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
 
     /// Returns a reference to the used map
     #[inline(always)]
-    pub(crate) fn used_map(&self) -> &AllocMap<ALIGN> { &self.used }
+    pub(crate) fn used_map(&self) -> &BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>> {
+        &self.used
+    }
+    //pub(crate) fn used_map(&self) -> &AllocMap<ALIGN> { &self.used }
+
 
     /// Returns a mutable reference to the used map
     #[inline(always)]
-    pub(crate) unsafe fn used_map_mut(&mut self) -> &mut AllocMap<ALIGN> { &mut self.used }
+    pub(crate) unsafe fn used_map_mut(&mut self) -> &mut BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>> {
+        &mut self.used
+    }
+    //pub(crate) unsafe fn used_map_mut(&mut self) -> &mut AllocMap<ALIGN> { &mut self.used }
 
 
 
@@ -59,7 +70,7 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     where I: IntoIterator<Item = TakenExtent<ALIGN, InternalExtent<ALIGN>>> {
         //  TODO: create an `initialize_with_stats()` variant that initializes statistics
 
-        if !self.free.map.is_empty() || !self.used.map.is_empty() {
+        if !self.free.map.is_empty() || !self.used/*.map*/.is_empty() {
             return Err(AlreadyInitialized)
         }
 
@@ -72,11 +83,16 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
 
             let (map, ext) = match ext {
                 TakenExtent::Free(ext) => (&mut self.free, ext),
-                TakenExtent::Used(ext) => (&mut self.used, ext)
+                TakenExtent::Used(ext) => {//(&mut self.used, ext)
+                    match self.used.insert(ext.address(), ext.size()) {
+                        Some(_) => panic!("found overlapping extents"),
+                        None => continue,
+                    }
+                },
                 /*TakenExtent::Used(ext) => {
                     used_pages = used_pages.saturating_add(ext.size().get());
                     (&mut self.used, ext)
-                }*/,
+                }*/
             };
 
             //total_pages = total_pages.saturating_add(ext.size().get());
@@ -106,8 +122,8 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     fn clear(&mut self) {
         self.free.map.clear();
         self.free.size_index.clear();
-        self.used.map.clear();
-        self.used.size_index.clear();
+        self.used/*.map*/.clear();
+        //self.used.size_index.clear();
     }
 
 
@@ -133,10 +149,15 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
         };
 
         //  adds the extent described by the `layout` to the used tree
-        if let Err(_) = self.used.insert_extent(allocated.clone()) {
+
+        if let Some(_) = self.used.insert(allocated.address(), allocated.size()) {
             cold_path();
             panic!("failed to insert into used map")
-        };
+        }
+        /*if let Err(_) = self.used.insert_extent(allocated.clone()) {
+            cold_path();
+            panic!("failed to insert into used map")
+        };*/
 
         //  statistics
         //  _ = self.stats.used().fetch_add(allocated.size().get(), AcqRel);
@@ -153,7 +174,8 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
 
         {   //  remove ext from used map
             let used_map = unsafe { self.used_map_mut() };
-            used_map.extract_exact_extent(ext.clone())?;
+            used_map.remove_entry(&ext.address()).ok_or(())?;
+            //used_map.extract_exact_extent(ext.clone())?;
         }
 
         {   //  insert ext into free map (defragment)
@@ -180,7 +202,10 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     pub fn deallocate_part(&mut self, ext: MutableExtent<ALIGN>, part: MutableExtent<ALIGN>) -> Result<(), PartDeallocError> {
 
         //  extract from used
-        self.used.extract_extent_part(ext.clone(), part.clone()).map_err(|e| e.into_dealloc_error() )?;
+        if let None = self.used.remove(&ext.address()) {
+            return Err(PartDeallocError::UnregisteredExtent)
+        }
+        //self.used.extract_extent_part(ext.clone(), part.clone()).map_err(|e| e.into_dealloc_error() )?;
 
         //  since the function above returned `Ok`
         //      it is guaranteed that `part` fits into `ext`

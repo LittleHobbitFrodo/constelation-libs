@@ -2,8 +2,6 @@
 //!
 //! This includes:
 //! - Extent allocator (work in progress)
-//! - Physical allocator (work in progress)
-//! - Virtual address space mapper (not yet merged, work in progress)
 //! - Global allocator (not yet implemented)
 //! - And more!
 
