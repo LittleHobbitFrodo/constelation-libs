@@ -13,7 +13,7 @@ pub struct AlignedNonNull<Addr: NonNullAddress<ALIGN>, const ALIGN: usize>(Addr)
 impl<Addr: NonNullAddress<ALIGN>, const ALIGN: usize> AlignedNonNull<Addr, ALIGN> {
 
     /// Constructs a new `AlignedNonNull` if the given
-    /// `address` is aligned to a certain boundary
+    /// `address` is aligned to the generic `ALIGN` boundary
     #[inline]
     pub fn new(address: Addr) -> Option<Self> {
         if address.inner().is_aligned_to(ALIGN) {
@@ -23,15 +23,28 @@ impl<Addr: NonNullAddress<ALIGN>, const ALIGN: usize> AlignedNonNull<Addr, ALIGN
         }
     }
 
+    /// Constructs a new `AlignedNonNull` without checking whether the `address`
+    /// is non null and aligned to the `ALIGN` boundary
+    ///
+    /// # Safety
+    /// It is up to caller to guarantee that the given `address`
+    /// is non-null and aligned to `ALIGN`
     pub const unsafe fn new_unchecked(address: Addr) -> Self {
         Self(address)
     }
 
+    /// Constructs a new `AlignedNonNull` by aligning the `address` down to the generic `ALIGN` boundary
+    ///
+    /// Given that the alignment operation can make the
+    /// address NULL, this function returns the `AlignedAddress`
+    /// only if the alignment operation yields non-null result
     #[inline]
     pub fn new_down(address: Addr) -> Option<Self> {
         Some(Self(Addr::from_inner(address.inner().align_down(ALIGN))?))
     }
 
+    /// Constructs a new `AlignedNonNull` by aligning the `address` up to the generic `ALIGN` boundary
+    /// - This operation will never overflow
     #[inline]
     pub fn new_up(address: Addr) -> Self {
         unsafe {
@@ -39,23 +52,36 @@ impl<Addr: NonNullAddress<ALIGN>, const ALIGN: usize> AlignedNonNull<Addr, ALIGN
         }
     }
 
+    /// Adds the given `pages` (chunks of `ALIGN` bytes) to the address
     #[inline(always)]
     pub fn aligned_add(self, pages: usize) -> Self {
         Self(self.0.align_add(pages))
     }
 
+    /// Adds the given `pages` (chunks of `ALIGN` bytes) to the address
     #[inline]
     pub fn aligned_offset(self, pages: isize) -> Option<Self> {
         Some(Self(self.0.align_offset(pages)?))
     }
 
+    /// Returns the inner address
     #[inline(always)]
     #[allow(private_interfaces)]
     pub fn as_inner(&self) -> Addr::Inner { self.0.inner() }
 
 
+    /// Calculates the alignment of this address
+    /// - In other words: the least significant bit that is set
     #[inline(always)]
-    pub fn get_align(&self) -> Addr::NZVariant { self.0.get_align() }
+    pub fn alignment(&self) -> Addr::NZVariant { self.0.alignment() }
+
+
+    /// Calculates the alignment of this address
+    /// - In other words: the least significant bit that is set
+    #[inline(always)]
+    pub fn max_alignment(&self) -> Addr::NZVariant { self.0.max_alignment() }
+
+
 
 
 }
@@ -82,7 +108,7 @@ impl<Addr: NonNullAddress<ALIGN>, const ALIGN: usize> Pointer for AlignedNonNull
 
 trait NonNullMarker {}
 
-
+#[allow(private_bounds)]
 pub trait NonNullAddress<const ALIGN: usize> where Self: Sized + Clone + NonNullMarker {
 
     /// The inner type
@@ -114,7 +140,12 @@ pub trait NonNullAddress<const ALIGN: usize> where Self: Sized + Clone + NonNull
     fn align_offset(self, pages: isize) -> Option<Self>;
 
     /// Calculates the alignment of this address
-    fn get_align(&self) -> Self::NZVariant;
+    /// - In other words: the least significant bit that is set
+    fn alignment(&self) -> Self::NZVariant;
+
+    /// Calculates the maximum alignment of this address
+    /// - In other words: the most significant bit that is set
+    fn max_alignment(&self) -> Self::NZVariant;
 
 }
 
@@ -160,7 +191,10 @@ impl<const ALIGN: usize> NonNullAddress<ALIGN> for NonZero<usize> {
 
 
     #[inline(always)]
-    fn get_align(&self) -> NonZero<usize> { self.isolate_lowest_one() }
+    fn alignment(&self) -> NonZero<usize> { self.isolate_lowest_one() }
+
+    #[inline(always)]
+    fn max_alignment(&self) -> Self::NZVariant { self.isolate_highest_one() }
 
 }
 
@@ -211,7 +245,10 @@ impl<const ALIGN: usize> NonNullAddress<ALIGN> for NonZero<u64> {
     }
 
     #[inline(always)]
-    fn get_align(&self) -> NonZero<u64> { self.isolate_lowest_one() }
+    fn alignment(&self) -> NonZero<u64> { self.isolate_lowest_one() }
+
+    #[inline(always)]
+    fn max_alignment(&self) -> Self::NZVariant { self.isolate_highest_one() }
 
 }
 
@@ -262,9 +299,16 @@ impl<T, const ALIGN: usize> NonNullAddress<ALIGN> for NonNull<T> {
     }
 
     #[inline(always)]
-    fn get_align(&self) -> NonNull<T> {
+    fn alignment(&self) -> NonNull<T> {
         unsafe {
             NonNull::new_unchecked((self.as_ptr() as usize).isolate_lowest_one() as *mut T)
+        }
+    }
+
+    #[inline(always)]
+    fn max_alignment(&self) -> Self::NZVariant {
+        unsafe {
+            NonNull::new_unchecked((self.as_ptr() as usize).isolate_highest_one() as *mut T)
         }
     }
 

@@ -1,7 +1,9 @@
-use super::{AddressMap, SizeMap};
-use crate::{cold_panic, extent_alloc::{extent::RemainingExtents, raw_alloc::PartDeallocError}};
+use alloc::collections::BTreeSet;
 
-use core::{hint::cold_path, num::NonZero};
+use super::{AddressMap, SizeMap};
+use crate::{AlignedNonNull, Alignment, NonNullAddress, cold_panic, extent_alloc::{extent::RemainingExtents, raw_alloc::PartDeallocError}};
+
+use core::{hint::cold_path, mem::ManuallyDrop, num::{NonZero, NonZeroIsize}};
 
 use crate::extent_alloc::{
     extent::{Extent, InternalExtent, MutableExtent, RawExtent}, layout::LayoutDescriptor};
@@ -34,36 +36,75 @@ impl<const ALIGN: usize> AllocMap<ALIGN> {
     }
 
 
-    /// Finds a suitable extent in the given map to satisfy the given `layout`
+    /// Finds a suitable extent to satisfy the given `layout`
     ///
-    /// The returned extent is the one deemed suitable (thus the one found in the map)
-    /// - The returned extent does not exactly fit the `layout`
-    pub(crate) fn find_suitable(&self, layout: impl LayoutDescriptor<ALIGN>) -> Option<MutableExtent<ALIGN>> {
+    /// The returned extent is the one considered suitable (i.e., one that meets the alignment and size requirements)
+    /// - The size of the returned extent may not exactly match the requested size,
+    /// but the extent is guaranteed to be at least as large as specified by the `layout`
+    pub(crate) fn find_suitable(&self, layout: impl LayoutDescriptor<ALIGN>) ->  Option<SuitableExtent<ALIGN>> {
+        //  -> Option<MutableExtent<ALIGN>>
 
-        'by_size: for (size, by_align) in self.size_index.iter() {
-            if *size < layout.size() { continue 'by_size }
+        for (size, by_max_align) in self.size_index.range(layout.size()..).filter(|(size, _)| *size >= &layout.size() ) {
 
-            'by_align: for (align, addresses) in by_align.iter() {
-                if *align < layout.align() { continue 'by_align }
+            //  observation: iterate `by_max_align` by shifting the `layout.align()` left by 1 each iteration
 
-                //  there shall not be any empty self
-                debug_assert!(!addresses.is_empty());
+            for (_max_align, addresses) in by_max_align.range(layout.align()..).filter(|(max_align, _)| *max_align >= &layout.align() ) {
 
-                if let Some(addr) = addresses.iter().rev().next() {
-                    return Some(MutableExtent::new(*addr, *size))
-                } else {
-                    continue
+                for address in addresses.iter() {
+
+                    let suitable = MutableExtent::new(*address, *size);
+
+                    //  align the address up to `layout.align()` to figure out where would the extent start
+                    let aligned_up = /*unsafe*/ {
+                        //  safety: align_up() always return a number larger than the input
+                        NonZero::new/*_unchecked*/(address.get().align_up(layout.align().get() as usize)).unwrap()
+                    };
+
+                    let allocated = MutableExtent::new(AlignedNonNull::new(aligned_up).unwrap(), layout.size());
+
+                    if allocated.fits_into(&suitable) {
+                        return Some(SuitableExtent { suitable, allocated })
+                    }
                 }
             }
+
         }
 
         None    //  no suitable extent found
     }
 
 
+    /// Finds a suitable extent that satisfies the specified `layout`.
+    /// If no such extent can be found, this function returns the extent
+    /// that is closest to the given `layout` (i.e., the one that meets
+    /// the alignment requirement and is closest in size to the requested size).
+    /// In this case, the returned extent is always smaller than requested.
+    ///
+    /// To verify that the returned extent is fully suitable, simply compare
+    /// the extent size with the `layout` size (the extent always meets the
+    /// alignment requirement). If the extent size is greater than or equal
+    /// to the requested size, the extent is considered suitable.
+    ///
+    /// ```rust
+    /// let ext = map.find_closest_to(some_layout)
+    ///     .unwrap();
+    ///
+    /// let is_suitable = if ext.size >= layout.size() {
+    ///     true    //  is considered suitable
+    /// } else {
+    ///     false   //  is considered closest to suitable
+    /// };
+    /// ```
+    pub(crate) fn find_closest_to(&self, layout: impl LayoutDescriptor<ALIGN>) -> Option<MutableExtent<ALIGN>> {
+
+        todo!("find with maximum align");
+
+    }
+
+
     /// Removes the extent from the map
     ///
-    /// An returned `Err`or indicates that the extent was not found
+    /// Returned `Err` indicates that the extent was not found
     pub(crate) fn extract_exact_extent(&mut self, extent: MutableExtent<ALIGN>) -> Result<(), ()> {
 
         let by_align = match self.size_index.get_mut(&extent.size()) {
@@ -73,7 +114,7 @@ impl<const ALIGN: usize> AllocMap<ALIGN> {
 
         //  remove the address from size_index
         //  - addresses are unique, so this would eventually have to happen anyway
-        match by_align.get_mut(&(&extent.address().get_align())) {
+        match by_align.get_mut(&(&extent.end_address().max_alignment())) {
             Some(addresses) => {
                 if addresses.remove(&extent.address()) {
 
@@ -221,7 +262,7 @@ impl<const ALIGN: usize> AllocMap<ALIGN> {
 
         let by_align = self.size_index.entry(ext.size()).or_default();
 
-        let addresses = by_align.entry(ext.address().get_align()).or_default();
+        let addresses = by_align.entry(ext.end_address().max_alignment()).or_default();
         if !addresses.insert(ext.address()) {
             //  insertion failed, but the extent is already in the map
             //  - Remove the extent from the map to keep the system sound
@@ -241,18 +282,25 @@ impl<const ALIGN: usize> AllocMap<ALIGN> {
     /// Since any state where this function is unable to perform its
     /// task is considered unexpected and/or undefined, it will simply panic when such state is detected
     pub(crate) fn insert_extent(&mut self, mut ext: MutableExtent<ALIGN>) -> Result<(), ()> {
-        let end_address = ext.end_address();
+
+        todo!("check");
+
+        let ext_end_address = ext.end_address();
 
         //  used in recovery
         let original = ext.clone();
 
         //  remove from map
-        match self.map.remove(&end_address) {
+        match self.map.remove(&ext_end_address) {
             Some(neigh_size) => {
                 //  has neighbor => defragment
 
-                {   //  remove the neighbor from size_index
+                let neigh_end_address = ext_end_address.aligned_add(neigh_size.get() as usize);
+
+                {   //  manually remove the neighbor from size_index
                     //      - neighbor is already removed from the map
+                    //
+                    //      - ext_end_address = neighbor's starting address
 
                     //  panics here are intended: since the neighboring extent was
                     // found in the map, it must always be in the size index.
@@ -260,26 +308,26 @@ impl<const ALIGN: usize> AllocMap<ALIGN> {
 
                     let by_align = match self.size_index.get_mut(&neigh_size) {
                         Some(by_align) => by_align,
-                        None => cold_panic!("failed to index size_index"),
+                        None => cold_panic!("could not find neighboring extent in size_index:by_size"),
                     };
 
-                    let addresses = match by_align.get_mut(&end_address.get_align()) {
+                    let addresses = match by_align.get_mut(&neigh_end_address.max_alignment()) {
                         Some(a) => a,
-                        None => cold_panic!("failed to index size_index:by_align"),
+                        None => cold_panic!("could not found neighboring extent in size_index:by_align"),
                     };
 
-                    if !addresses.remove(&end_address) {
-                        cold_panic!("size_index:addresses does not contain the address");
+                    if !addresses.remove(&ext_end_address) {
+                        cold_panic!("could not remove the neighboring extent from size_index:addresses");
                     }
 
                     if addresses.is_empty() {
-                        if let None = by_align.remove(&end_address.get_align()) {
-                            cold_panic!("failed to remove the map from size_index");
+                        if let None = by_align.remove(&ext_end_address.max_alignment()) {
+                            cold_panic!("failed to remove the address map from size_index");
                         }
                     }
                 }
 
-                let neighbor = MutableExtent::new(end_address, neigh_size);
+                let neighbor = MutableExtent::new(ext_end_address, neigh_size);
 
                 //  defragment => merge ext and neighbor
                 let merged = {
@@ -400,4 +448,14 @@ impl PartExtractionError {
             core::mem::transmute(self)
         }
     }
+}
+
+
+/// Contains the extent that is deemed suitable and its part to be allocated
+pub struct SuitableExtent<const ALIGN: usize> {
+    /// The extent that the `allocated` fits into
+    pub suitable: MutableExtent<ALIGN>,
+    /// The part of the `suitable` extent that is meant to be allocated
+    /// - Is guaranteed to fit into `suitable`
+    pub allocated: MutableExtent<ALIGN>,
 }

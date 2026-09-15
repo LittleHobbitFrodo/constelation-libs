@@ -1,26 +1,24 @@
 use alloc::collections::BTreeMap;
 
 use crate::{AlignedNonNull, extent_alloc::{
-    extent::{Extent, InternalExtent, MutableExtent, RemainingExtents, ScopedExtent, TakenExtent}, layout::LayoutDescriptor,
+    extent::{Extent, InternalExtent, MutableExtent, RemainingExtents, ScopedExtent, TakenExtent}, helpers::SuitableExtent, layout::LayoutDescriptor,
 }};
 use super::helpers::AllocMap;
 use core::{hint::cold_path, num::NonZero};
 use crate::cold_panic;
 
 
-//use functions::{find_suitable_in, extract_extent_from, insert_extent_to};
 
 /// The raw extent allocator internally used by the `ExtentAllocator` and `CachedExtentAllocator`
 #[repr(C)]
 pub struct RawExtentAlloc<const ALIGN: usize> {
     free: AllocMap<ALIGN>,
     used: BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>>
-    //used: AllocMap<ALIGN>,
 }
 
 impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     pub const fn uninit() -> Self {
-        Self { used: /*AllocMap::uninit()*/ BTreeMap::new(), free: AllocMap::uninit() }
+        Self { used: BTreeMap::new(), free: AllocMap::uninit() }
     }
 }
 
@@ -41,7 +39,6 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     pub(crate) fn used_map(&self) -> &BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>> {
         &self.used
     }
-    //pub(crate) fn used_map(&self) -> &AllocMap<ALIGN> { &self.used }
 
 
     /// Returns a mutable reference to the used map
@@ -49,7 +46,6 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     pub(crate) unsafe fn used_map_mut(&mut self) -> &mut BTreeMap<AlignedNonNull<NonZero<u64>, ALIGN>, NonZero<u64>> {
         &mut self.used
     }
-    //pub(crate) unsafe fn used_map_mut(&mut self) -> &mut AllocMap<ALIGN> { &mut self.used }
 
 
 
@@ -68,53 +64,28 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     #[inline(never)]
     pub(crate) unsafe fn initialize<I>(&mut self, iter: I) -> Result<(), AlreadyInitialized>
     where I: IntoIterator<Item = TakenExtent<ALIGN, InternalExtent<ALIGN>>> {
-        //  TODO: create an `initialize_with_stats()` variant that initializes statistics
 
-        if !self.free.map.is_empty() || !self.used/*.map*/.is_empty() {
+        if !self.free.size_index.is_empty() || !self.free.map.is_empty() || !self.used.is_empty() {
             return Err(AlreadyInitialized)
         }
 
-
-        //let mut total_pages: u64 = 0;
-        //let mut used_pages: u64 = 0;
-
-
         for ext in iter.into_iter() {
 
-            let (map, ext) = match ext {
-                TakenExtent::Free(ext) => (&mut self.free, ext),
-                TakenExtent::Used(ext) => {//(&mut self.used, ext)
-                    match self.used.insert(ext.address(), ext.size()) {
-                        Some(_) => panic!("found overlapping extents"),
-                        None => continue,
+            match ext {
+                TakenExtent::Free(ext) => {
+                    if let Err(_) = self.free.insert_extent_fragmented(&MutableExtent::from_regular(ext)) {
+                        cold_panic!("found overlapping extents")
                     }
                 },
-                /*TakenExtent::Used(ext) => {
-                    used_pages = used_pages.saturating_add(ext.size().get());
-                    (&mut self.used, ext)
-                }*/
-            };
+                TakenExtent::Used(ext) => {
 
-            //total_pages = total_pages.saturating_add(ext.size().get());
-
-
-            if let Some(_) = map.map.insert(ext.address(), ext.size()) {
-                //  no overlapping extents => addresses are unique
-                panic!("found overlapping extents")
+                    //  insert into the used map
+                    if let Some(_) = self.used.insert(ext.address(), ext.size()) {
+                        cold_panic!("found overlapping extents")
+                    }
+                },
             }
-
-            let by_size = map.size_index.entry(ext.size()).or_default();
-            let by_align = by_size.entry(ext.address().get_align()).or_default();
-            if !by_align.insert(ext.address()) {
-                //  no overlapping extents => addresses are unique
-                panic!("found overlapping extents")
-            }
-
         }
-
-        //  save statistics
-        //_ = self.stats.total().store(total_pages, Release);
-        //_ = self.stats.used().store(used_pages, Release);
 
         Ok(())
     }
@@ -122,8 +93,7 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     fn clear(&mut self) {
         self.free.map.clear();
         self.free.size_index.clear();
-        self.used/*.map*/.clear();
-        //self.used.size_index.clear();
+        self.used.clear();
     }
 
 
@@ -132,37 +102,57 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
     /// Allocates one contignous extent as described by the `layout`
     /// - The returned extent needs to be deallocated manually
     #[inline(never)]
-    pub fn allocate(&mut self, layout: impl LayoutDescriptor<ALIGN>) -> Option<InternalExtent<ALIGN>> {
+    pub fn allocate_exact(&mut self, layout: impl LayoutDescriptor<ALIGN>) -> Option<InternalExtent<ALIGN>> {
 
-        //  finds suitable extent for the allocation
-        //  - suitable means at least as big as `layout` dictates + correct layout
-        let suitable = self.free.find_suitable(layout.clone())?;
+        debug_assert!(layout.align().is_power_of_two());
 
-        //  removes an extent described by the `layout` from the free tree
-        let allocated = match self.free.extract_extent(suitable, layout) {
-            Ok(ext) => ext,
-            Err(_) => {
-                //  if the extent was found, it can be extracted
-                cold_path();
-                panic!("failed to extract from free map");
-            }
-        };
+        let SuitableExtent { suitable, allocated } = self.free.find_suitable(layout)?;
 
-        //  adds the extent described by the `layout` to the used tree
+        debug_assert!(allocated.fits_into(&suitable));
 
-        if let Some(_) = self.used.insert(allocated.address(), allocated.size()) {
+
+        //  remove the suitable extent from the free map
+        if let Err(_) = self.free.extract_exact_extent(suitable.clone()) {
             cold_path();
-            panic!("failed to insert into used map")
+            return None
         }
-        /*if let Err(_) = self.used.insert_extent(allocated.clone()) {
-            cold_path();
-            panic!("failed to insert into used map")
-        };*/
 
-        //  statistics
-        //  _ = self.stats.used().fetch_add(allocated.size().get(), AcqRel);
+        //  remove the allocated extent from the suitable extent
+        match allocated.clone().remove_from(suitable.clone()) {
+            Ok(RemainingExtents { front, remainder }) => {
+                //  insert the front and remainder extents into the used map
 
-        Some(allocated.into_regular())
+                if let Some(front) = front {
+                    if let Some(_) = self.used.insert(front.address(), front.size()) {
+                        //  recovery: re-insert suitable into free
+
+                        cold_path();
+                        if let Err(_) = self.free.insert_extent_fragmented(&suitable) {
+                            cold_panic!("ExtentAllocator recovery failed: could not re-insert suitable extent");
+                        }
+                    }
+                }
+
+                if let Some(rem) = remainder {
+                    if let Some(_) = self.used.insert(rem.address(), rem.size()) {
+                        cold_panic!("ExtentAllocator recovery failed: could not insert remainder extent")
+                    }
+                }
+
+
+                Some(allocated.into_regular())
+            },
+            Err(_) => None,
+        }
+    }
+
+
+    /// Allocates one contignous extent as described by the `layout`. If there
+    /// is no extent that can fit the `layout`, this function will instead
+    /// choose an extent that is closest to meeting the required `layout`
+    #[inline(never)]
+    pub fn allocate_closest(&mut self, layout: impl LayoutDescriptor<ALIGN>) -> Option<InternalExtent<ALIGN>> {
+        todo!("AllocMap::find_closest_to() is unimplemented");
     }
 
 
@@ -175,7 +165,6 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
         {   //  remove ext from used map
             let used_map = unsafe { self.used_map_mut() };
             used_map.remove_entry(&ext.address()).ok_or(())?;
-            //used_map.extract_exact_extent(ext.clone())?;
         }
 
         {   //  insert ext into free map (defragment)
@@ -185,10 +174,9 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
                     cold_path();
 
                     //  recovery: re-insert ext into used
-                    let free_map = unsafe { self.free_map_mut() };
-                    if let Err(_) = free_map.insert_extent(ext) {
-                        //  the same error message as for `cold_recovery_panic!()`
-                        cold_panic!("ExtentAllocator error recovery failed: failed to re-insert the extent into used map");
+                    let used_map = unsafe { self.used_map_mut() };
+                    if let Some(_) = used_map.insert(ext.address(), ext.size()) {
+                        cold_panic!("ExtentAllocator error recovery failed: failed to re-insert the extent into used map")
                     }
 
                     Err(())
@@ -200,22 +188,7 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
 
     /// Deallocates the `part` of the given extent
     pub fn deallocate_part(&mut self, ext: MutableExtent<ALIGN>, part: MutableExtent<ALIGN>) -> Result<(), PartDeallocError> {
-
-        //  extract from used
-        if let None = self.used.remove(&ext.address()) {
-            return Err(PartDeallocError::UnregisteredExtent)
-        }
-        //self.used.extract_extent_part(ext.clone(), part.clone()).map_err(|e| e.into_dealloc_error() )?;
-
-        //  since the function above returned `Ok`
-        //      it is guaranteed that `part` fits into `ext`
-
-        //  insert part into free map
-        if let Err(_) = self.free.insert_extent_fragmented(&part) {
-            cold_panic!("failed to insert the free part of the extent");
-        }
-
-        Ok(())
+        todo!();
     }
 
 

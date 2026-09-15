@@ -65,7 +65,7 @@ impl<const ALIGN: usize, Lay: LayoutDescriptor<ALIGN>> ExtentCache<ALIGN, Lay> f
 
         match &mut self.cached {
             Some(cached) => {
-                if cached.size() >= layout.size() && cached.address().get_align() >= layout.align() {
+                if cached.size() >= layout.size() && cached.address().alignment() >= layout.align() {
 
                     //  the function returns the original extent
                     let original = cached.clone().into_regular();

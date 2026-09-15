@@ -33,7 +33,8 @@ impl<const ALIGN: usize> AddressMap<ALIGN> {
 
 
 
-/// A map used internally by the allocator that uses address alignment as keys and a map of addresses as values
+/// A map used internally by the allocator that uses maximum address alignment as keys and a map of addresses as values
+/// - You get the index using `address.max_alignment()`
 #[repr(transparent)]
 #[derive(Default, Clone, Debug)]
 pub(crate) struct AlignMap<const ALIGN: usize>(BTreeMap<NonZero<u64>, BTreeSet<AlignedNonNull<NonZero<u64>, ALIGN>>>);

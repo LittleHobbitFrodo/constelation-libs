@@ -25,7 +25,9 @@ trait AlignmentMarker where Self: Sized + Copy + Clone {}
 #[allow(private_bounds)]
 pub trait Alignment where Self: AlignmentMarker {
     /// Aligns the address up to a specific boundary
-    /// - The given `align` is required to be a power of two
+    /// - This operation will never overflow the integer boundary
+    ///
+    /// The given `align` is required to be a power of two
     fn align_up(self, align: usize) -> Self;
     /// Aligns the address down to a specific boundary
     /// - The given `align` is required to be a power of two
@@ -34,14 +36,18 @@ pub trait Alignment where Self: AlignmentMarker {
     /// - The given `align` is required to be a power of two
     fn is_aligned_to(&self, align: usize) -> bool;
     /// Returns the alignment of `self`
-    /// - In other words: the first bit that is set
-    fn get_align(&self) -> Self;
+    /// - In other words: the least significant bit that is set
+    fn alignment(&self) -> Self;
+    /// Returns the maximum alignment of `self`
+    /// - In other words: the most significant bit that is set
+    fn max_alignment(&self) -> Self;
 }
 
 
 /// Trait used to align addresses to a architecture-specific page boundary
 pub trait PageAlignment where Self: Alignment {
     /// Aligns the address up to a page boundary
+    /// - This operation will never overflow the integer boundary
     fn page_align_up(self) -> Self;
     /// Aligns the address down to a page boundary
     fn page_align_down(self) -> Self;
@@ -56,12 +62,18 @@ macro_rules! impl_alignment {
         impl Alignment for $type {
             #[inline(always)]
             fn align_up(self, align: usize) -> Self { (self.saturating_add(((align as $type)-1))) & !((align as $type)-1) }
+
             #[inline(always)]
             fn align_down(self, align: usize) -> Self { self & !((align as $type)-1) }
+
             #[inline(always)]
             fn is_aligned_to(&self, align: usize) -> bool { (self & !((align as $type)-1)) == *self }
+
             #[inline(always)]
-            fn get_align(&self) -> Self { self.isolate_lowest_one() }
+            fn alignment(&self) -> Self { self.isolate_lowest_one() }
+
+            #[inline(always)]
+            fn max_alignment(&self) -> Self { self.isolate_highest_one() }
         }
     };
     (T, $type:ty) => {
@@ -69,12 +81,18 @@ macro_rules! impl_alignment {
         impl<T> Alignment for $type {
             #[inline(always)]
             fn align_up(self, align: usize) -> Self { (((self as usize).saturating_add(((align as usize)-1))) & !((align as usize)-1)) as $type }
+
             #[inline(always)]
             fn align_down(self, align: usize) -> Self { (self as usize & !((align as usize)-1)) as $type }
+
             #[inline(always)]
             fn is_aligned_to(&self, align: usize) -> bool { (*self as usize & !((align as usize)-1)) as $type == *self }
+
             #[inline(always)]
-            fn get_align(&self) -> Self { (*self as usize).isolate_lowest_one() as Self }
+            fn alignment(&self) -> Self { (*self as usize).isolate_lowest_one() as Self }
+
+            #[inline(always)]
+            fn max_alignment(&self) -> Self { (*self as usize).isolate_highest_one() as Self }
         }
     };
 }

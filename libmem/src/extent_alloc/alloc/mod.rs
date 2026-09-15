@@ -83,7 +83,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     /// `deallocate()` function or transformed into a `OwnedExtent`
     #[inline]
     pub fn alloc_contignous<'me>(&'me mut self, layout: Lay) -> Option<ScopedExtent<'me, ALIGN, Ext, Self>> {
-        self.alloc.allocate(layout).map(|ext| unsafe {
+        self.alloc.allocate_exact(layout).map(|ext| unsafe {
             ScopedExtent::<'me, ALIGN, Ext, Self>::from_extent(Ext::new(ext.address(), ext.size()))
         } )
     }
@@ -98,7 +98,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     pub fn alloc<'me>(&'me mut self, mut layout: Lay) -> Option<Batch<'me, ALIGN, Ext, Self>> {
 
         //  try to allocate, split the layout if fails
-        let mut lays = match self.alloc.allocate(layout.clone()) {
+        let mut lays = match self.alloc.allocate_exact(layout.clone()) {
             Some(ext) => {
                 let ext = unsafe { ScopedExtent::from_extent(Ext::new(ext.address(), ext.size())) };
                 return Some(Batch::from_single(ext))
@@ -118,7 +118,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
         //  try to allocate each of the layouts stored in `lays`
         while let Some(mut layout) = lays.pop() {
 
-            match self.alloc.allocate(layout.clone()) {
+            match self.alloc.allocate_exact(layout.clone()) {
                 Some(ext) => {  //  success: push into exts
                     let ext = unsafe {
                         ScopedExtent::from_extent(Ext::new(ext.address(), ext.size()))

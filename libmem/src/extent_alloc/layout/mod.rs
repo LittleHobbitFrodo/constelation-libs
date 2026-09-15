@@ -25,6 +25,10 @@ pub trait LayoutDescriptor<const ALIGN: usize> where Self: Sized + Clone {
     unsafe fn from_pages_unchecked(count: NonZero<u64>) -> Self;
 
     /// Returns the alignment requirements of the allocated frame
+    ///
+    /// The returned value is guaranteed to be greater than or equal
+    /// to the `ALIGN` generic constant and power of two
+    /// - This may be asserted by the allocator
     fn align(&self) -> NonZero<u64>;
 
     /// Splits a bigger extent into smaller pieces if it cannot be allocated
