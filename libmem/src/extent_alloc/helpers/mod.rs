@@ -54,6 +54,7 @@ impl<const ALIGN: usize> DerefMut for AlignMap<ALIGN> {
 
 impl<const ALIGN: usize> AlignMap<ALIGN> {
     pub const fn new() -> Self { Self(BTreeMap::new()) }
+
 }
 
 

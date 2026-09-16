@@ -47,3 +47,43 @@ macro_rules! cold_panic {
         panic!($($arg)*);
     }};
 }
+
+
+/// Explicitly marks assumptions made by a programmer. This macro generally
+/// expands into the `debug_asset!()` macro that asserts the invariant only
+/// in debug mode (`#[cfg(debug_assertions)]`). However, there
+/// is second, strict variant that uses the `assert!()` macro
+/// that always asserts the invariant.
+///
+/// # Usage
+/// The difference between `assume!()` and any other assertion is
+/// that (by the name), `assume!()` marks implicit assumtions that
+/// may not be clear to other programmers reading/writing code.
+///
+/// ```rust
+/// fn do_something(input: u32) {
+///     //  this function assumes that the input is always less than 32
+///     //  - expands into `debug_assert!()`
+///     assume!(input < 32);
+///
+///     //  ...
+/// }
+/// ```
+///
+/// ```rust
+/// fn do_something(input: u32) {
+///     //  this function assumes that the input is always less than 32
+///     //  - expands into `assert!()`
+///     assume!(strict: input < 32);
+///
+///     //  ...
+/// }
+/// ```
+#[macro_export]
+macro_rules! assume {
+    (strict: $invariant:expr) => { assert!($invariant, stringify!(assumption failed: $invariant)) };
+    (strict: $invariant:expr, $msg:literal) => { assert!($invariant, $msg) };
+
+    ($invariant:expr) => { debug_assert!($invariant, stringify!(assumption failed: $invariant)) };
+    ($invariant:expr, $msg:literal) => { debug_assert!($invariant, $msg) };
+}

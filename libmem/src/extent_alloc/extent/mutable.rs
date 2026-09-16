@@ -2,7 +2,7 @@
 
 use core::{cmp::Ordering::{Equal, Greater, Less}, mem::ManuallyDrop, num::NonZero, ops::BitOrAssign};
 
-use crate::{AlignedAddress, AlignedNonNull, cold_panic, extent_alloc::extent::{Extent, InternalExtent, RawExtent}};
+use crate::{AlignedAddress, AlignedNonNull, Alignment, NonNullAddress, cold_panic, extent_alloc::extent::{Extent, InternalExtent, RawExtent}};
 
 
 
@@ -52,6 +52,49 @@ impl<const ALIGN: usize> MutableExtent<ALIGN> {
 
                 Ok(Some(Self::new(new_addr, new_size)))
             }
+        }
+    }
+
+
+    /// Finds the maximum alignment that any of the addresses contained in the extent can have
+    ///
+    /// By that definition, if you take starting address of the extent and align it
+    /// up to the returned alignment, it will always fit into the extent
+    /// - Tha same work for the ending address when aligned down
+    ///
+    /// ```rust
+    /// //  pseudo code
+    /// let alignment = mut_ext.find_max_alignment();
+    ///
+    /// let aligned_down = mut_ext.end_address().align_down(alignment);
+    /// let aligned_up = mut_ext.address().align_up(alignment);
+    ///
+    /// //  aligned addresses fits into the extent
+    /// assert!(mut_ext.address() <= aligned_down && mut_ext.end_address() >= aligned_down);
+    /// assert!(mut_ext.address() <= aligned_up && mut_ext.end_address() >= aligned_up);
+    /// ```
+    pub fn find_max_alignment(&self) -> NonZero<u64> {
+        let addr = self.end_address();
+
+        let mut align = ALIGN as u64;
+
+        loop {
+            let aligned_down = addr.get().align_down(align as usize);
+
+            if aligned_down < self.address().get() {
+                //  the address does not fit into the extent's address space
+                align  = align >> 1;
+                break
+            }
+            align = align << 1;
+        }
+
+        debug_assert!(align > 0);
+
+        unsafe {
+            //  safety: the algorithm above will never
+            // produce number smaller than `ALIGN`
+            NonZero::new_unchecked(align)
         }
     }
 
@@ -400,4 +443,34 @@ fn split() {
         assert!(splitted.size().get() == original.size().get() - split_size.get());
     }
 
+}
+
+
+#[test]
+fn find_max_alignment() {
+
+    use libtest::{TestRng, println};
+
+    let mut rand = TestRng::new();
+
+    for _ in 0..20_000 {
+
+        let ext: MutableExtent<1024> = MutableExtent::new(
+            AlignedNonNull::new_up(NonZero::new(rand.next_range(1..20240) as u64).unwrap()),
+            NonZero::new(rand.next_range(1..20240) as u64).unwrap());
+
+        let alignment = ext.find_max_alignment();
+
+        let aligned_down = ext.end_address().get().align_down(alignment.get() as usize);
+        let aligned_up = ext.address().get().align_up(alignment.get() as usize);
+
+
+        assert!(ext.address().get() <= aligned_down && ext.end_address().get() >= aligned_down);
+        assert!(ext.address().get() <= aligned_up && ext.end_address().get() >= aligned_up);
+        assert!(alignment.is_power_of_two());
+
+        let next_alignment = ext.end_address().get().align_down((alignment.get() << 1) as usize);
+
+        assert!(next_alignment < ext.address().get());
+    }
 }

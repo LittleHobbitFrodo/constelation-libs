@@ -167,20 +167,19 @@ impl<const ALIGN: usize> RawExtentAlloc<ALIGN> {
             used_map.remove_entry(&ext.address()).ok_or(())?;
         }
 
-        {   //  insert ext into free map (defragment)
-            match unsafe { self.free_map_mut().insert_extent(ext.clone()) } {
-                Ok(_) => Ok(()),
-                Err(_) => {
-                    cold_path();
+        //  insert ext into free map and defragment
+        match unsafe { self.free_map_mut() }.insert_extent(ext.clone()) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                cold_path();
 
-                    //  recovery: re-insert ext into used
-                    let used_map = unsafe { self.used_map_mut() };
-                    if let Some(_) = used_map.insert(ext.address(), ext.size()) {
-                        cold_panic!("ExtentAllocator error recovery failed: failed to re-insert the extent into used map")
-                    }
-
-                    Err(())
+                //  recovery: re-insert ext into used
+                let used_map = unsafe { self.used_map_mut() };
+                if let Some(_) = used_map.insert(ext.address(), ext.size()) {
+                    cold_panic!("ExtentAllocator error recovery failed: failed to re-insert the extent into used map")
                 }
+
+                Err(())
             }
         }
     }

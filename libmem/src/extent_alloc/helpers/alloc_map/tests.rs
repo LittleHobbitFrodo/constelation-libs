@@ -1,7 +1,6 @@
 
 use libtest::{TestRng, dbg, print, println};
 use crate::misc::Alignment;
-
 use core::num::NonZero;
 
 use crate::AlignedNonNull;
@@ -21,68 +20,6 @@ const MAX_EXT_COUNT: usize = 256;
 
 use alloc::vec::Vec;
 
-
-#[ignore = "unimplemented"]
-#[test]
-fn find_closest_extent() {
-
-    let mut rand = TestRng::new();
-
-    for _ in 0..500 {
-
-        let count = rand.next_range(256..512);
-
-        let exts = random_extents::<2048>(count, &mut rand);
-
-        let mut alloc = RawExtentAlloc::uninit();
-        let init_result = unsafe { alloc.initialize(exts.iter().cloned()) };
-        assert!(matches!(init_result, Ok(())));
-
-        let (free, _) = distinguish_free_and_used(exts);
-
-        for _ in 0..128 {
-
-            let layout = ExtentLayout::from_pages(NonZero::new(rand.next_range(512..4096) as u64).unwrap()).unwrap();
-
-            match alloc.free_map().find_closest_to(layout.clone()) {
-                Some(ext) => {
-                    //  check that there is no suitable extent
-                    //      and there is no better extent
-
-                    //  contains `(size, align)`
-                    let mut closest: Option<(NonZero<u64>, NonZero<u64>)> = None;
-
-                    for ext in free.iter() {
-                        if ext.address().alignment() >= layout.align() {
-                            if closest.is_some_and(|(size, _)| size < ext.size() ) {
-                                closest = Some((ext.size(), ext.address().alignment()));
-                            }
-
-                            if ext.size() >= layout.size() {
-                                panic!("the function could not find a suitable extent, but it was found manually");
-                            }
-                        }
-                    }
-
-                    let (size, align) = closest.expect("no closest found manually");
-
-                    assert!(ext.address().alignment() == align);
-                    assert!(ext.size() == size);
-                },
-                None => {
-                    //  There is no extent that satisfies the alignment
-
-
-                    todo!();
-                }
-            }
-
-        }
-
-
-    }
-
-}
 
 #[test]
 fn find_suitable_extent() {
@@ -106,8 +43,6 @@ fn find_suitable_extent() {
         for _ in 0..128 {
 
             let layout = ExtentLayout::from_pages(NonZero::new(rand.next_range(512..4096) as u64).unwrap()).unwrap();
-
-            println!("layout: {} -> {}", layout.size(), layout.align());
 
             //  find any suitable extent
             match alloc.free_map().find_suitable(layout.clone()) {
