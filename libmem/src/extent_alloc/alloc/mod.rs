@@ -3,7 +3,8 @@ use core::{hint::cold_path, marker::PhantomData};
 use alloc::vec::{Vec};
 
 use crate::{cold_panic, extent_alloc::{
-    ExtentAlloc, ExtentAllocMarker, extent::{self, Batch, Extent, InternalExtent, RawExtent, ScopedExtent, TakenExtent}, layout::{ExtentLayout, LayoutDescriptor}, raw_alloc::{AlreadyInitialized, RawExtentAlloc},
+    ExtentAlloc, ExtentAllocMarker, extent::{self, Batch, Extent, InternalExtent, MutableExtent, RawExtent, ScopedExtent, TakenExtent}, layout::{ExtentLayout, LayoutDescriptor}, raw_alloc::{AlreadyInitialized, RawExtentAlloc},
+    raw_alloc::PartDeallocError,
 }};
 
 
@@ -39,9 +40,7 @@ ExtentAllocMarker for ExtentAllocator<ALIGN, Ext, Lay> {}
 
 //  trait for use in generics
 impl<const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Lay: LayoutDescriptor<ALIGN>>
-ExtentAlloc<ALIGN> for ExtentAllocator<ALIGN, Ext, Lay> {
-
-}
+ExtentAlloc<ALIGN> for ExtentAllocator<ALIGN, Ext, Lay> {}
 
 impl<const ALIGN: usize, Ext: Extent<ALIGN> + RawExtent<ALIGN>, Lay: LayoutDescriptor<ALIGN>>
 ExtentAllocator<ALIGN, Ext, Lay> {
@@ -56,6 +55,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     }
 
     pub(crate) fn inner(&self) -> &RawExtentAlloc<ALIGN> { &self.alloc }
+
     pub(crate) unsafe fn inner_mut(&mut self) -> &mut RawExtentAlloc<ALIGN> { &mut self.alloc }
 
 
@@ -72,6 +72,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     /// The `AlreadyInitialized` error is returned only if this function has already been called in this instance
     #[cold]
     #[inline(never)]
+    #[must_use]
     pub(crate) unsafe fn initialize<I>(&mut self, iter: I) -> Result<(), AlreadyInitialized>
     where I: IntoIterator<Item = TakenExtent<ALIGN, InternalExtent<ALIGN>>> {
         unsafe { self.alloc.initialize(iter) }
@@ -82,6 +83,7 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     /// The returned extent must be deallocated by calling the
     /// `deallocate()` function or transformed into a `OwnedExtent`
     #[inline]
+    #[must_use]
     pub fn alloc_contignous<'me>(&'me mut self, layout: Lay) -> Option<ScopedExtent<'me, ALIGN, Ext, Self>> {
         self.alloc.allocate_exact(layout).map(|ext| unsafe {
             ScopedExtent::<'me, ALIGN, Ext, Self>::from_extent(Ext::new(ext.address(), ext.size()))
@@ -95,9 +97,12 @@ ExtentAllocator<ALIGN, Ext, Lay> {
     /// allocate the newly created layouts. This process repeats until the
     /// layout is fulfilled or the system run out of memory
     #[inline(never)]
+    #[must_use]
     pub fn alloc<'me>(&'me mut self, mut layout: Lay) -> Option<Batch<'me, ALIGN, Ext, Self>> {
 
-        //  try to allocate, split the layout if fails
+        todo!("AllocMap::find_closest_to() needs to be implemented");
+
+        /*//  try to allocate, split the layout if fails
         let mut lays = match self.alloc.allocate_exact(layout.clone()) {
             Some(ext) => {
                 let ext = unsafe { ScopedExtent::from_extent(Ext::new(ext.address(), ext.size())) };
@@ -152,8 +157,24 @@ ExtentAllocator<ALIGN, Ext, Lay> {
             }
         }
 
-        Some(Batch::from_vec(exts))
+        Some(Batch::from_vec(exts))*/
 
+    }
+
+
+    /// Deallocates the extent
+    #[inline(always)]
+    #[must_use]
+    pub fn deallocate(&mut self, ext: Ext) -> Result<(), ()> {
+        self.alloc.deallocate(MutableExtent::from_regular(ext))
+    }
+
+
+    /// Deallocates the `part` of the extent
+    #[inline(always)]
+    #[must_use]
+    pub fn deallocate_part(&mut self, ext: MutableExtent<ALIGN>, part: MutableExtent<ALIGN>) -> Result<(), PartDeallocError> {
+        self.alloc.deallocate_part(ext, part)
     }
 
 

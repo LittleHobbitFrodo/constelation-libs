@@ -199,7 +199,7 @@ fn extract_extent_part() {
                 }
             }
 
-            let RemainingExtents { front, remainder } = match small.remove_from(big) {
+            let RemainingExtents { left: front, right: remainder } = match small.remove_from(big) {
                 Ok(rem) => rem,
                 Err(_) => panic!("failed to remove small from big"),
             };

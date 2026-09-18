@@ -173,6 +173,8 @@ impl<const ALIGN: usize> MutableExtent<ALIGN> {
 
     /// Removes the given extent from `self` without checking
     /// whether the extent fits into `self`
+    /// - Returns the extents created by removing `self`
+    ///   - `self` is consumed, but not returned
     ///
     /// # Safety
     /// It is up to the caller to guarantee that the extent fits into `self`,
@@ -204,7 +206,7 @@ impl<const ALIGN: usize> MutableExtent<ALIGN> {
             }
         };
 
-        RemainingExtents { front, remainder }
+        RemainingExtents { left: front, right: remainder }
     }
 
     /*/// Returns the starting address of the extent
@@ -249,7 +251,8 @@ impl<const ALIGN: usize> MutableExtent<ALIGN> {
     }*/
 
 
-    /// Removes the given extent from `self`
+    /// Removes the given extent from `self`, returns the extents created by removing `self`
+    /// - `self` is consumed, but not returned
     ///
     /// If the given extent does not fit into `self`, the function returns ownership of `(self, ext)`
     pub fn remove_from(self, ext: Self) -> Result<RemainingExtents<ALIGN>, (Self, Self)> {
@@ -267,9 +270,9 @@ impl<const ALIGN: usize> MutableExtent<ALIGN> {
 /// Returned by `MutableExtent::remove_subext()`
 pub struct RemainingExtents<const ALIGN: usize> {
     /// The space in front of the removed extent
-    pub front: Option<MutableExtent<ALIGN>>,
+    pub left: Option<MutableExtent<ALIGN>>,
     /// The remaining space
-    pub remainder: Option<MutableExtent<ALIGN>>,
+    pub right: Option<MutableExtent<ALIGN>>,
 }
 
 
@@ -304,7 +307,7 @@ fn remove_from_unchecked() {
             assert!(small.fits_into(&big));
         }
 
-        let RemainingExtents { front, remainder } = unsafe { small.clone().remove_from_unchecked(big.clone()) };
+        let RemainingExtents { left: front, right: remainder } = unsafe { small.clone().remove_from_unchecked(big.clone()) };
 
 
         if small.address() == big.address() {
